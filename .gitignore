@@ -12,3 +12,4 @@ agent_chat_history.jsonl
 agent_chat_meta.json
 agent_active_project.json
 OPEN_ME_STATUS.json
+agent_backups/
