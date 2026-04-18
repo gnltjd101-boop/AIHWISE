@@ -10,6 +10,10 @@ Set-Location $repoRoot
 
 Write-Host "[1/5] Checking git status..." -ForegroundColor Cyan
 git status --short --branch
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "git status failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 if ([string]::IsNullOrWhiteSpace($Message)) {
     $Message = Read-Host "Enter commit message"
@@ -22,6 +26,10 @@ if ([string]::IsNullOrWhiteSpace($Message)) {
 
 Write-Host "[2/5] Staging changes..." -ForegroundColor Cyan
 git add .
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "git add failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 git diff --cached --quiet
 if ($LASTEXITCODE -eq 0) {
@@ -31,9 +39,17 @@ if ($LASTEXITCODE -eq 0) {
 
 Write-Host "[3/5] Creating commit..." -ForegroundColor Cyan
 git commit -m $Message
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "git commit failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 Write-Host "[4/5] Pushing to origin..." -ForegroundColor Cyan
 git push
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "git push failed. Authentication may be required." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 
 Write-Host "[5/5] Done" -ForegroundColor Green
 git status --short --branch
