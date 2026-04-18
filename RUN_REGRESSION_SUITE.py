@@ -14,6 +14,11 @@ sys.path.insert(0, str(ROOT))
 from agent_system.orchestrator import run_once  # noqa: E402
 
 
+PROFILE_ENV = "AGENT_REGRESSION_PROFILE"
+EXTENDED_ENV = "AGENT_REGRESSION_EXTENDED"
+DEFAULT_PROFILE = "base"
+
+
 BASE_SCENARIOS: list[dict[str, Any]] = [
     {
         "name": "automation_basic",
@@ -74,14 +79,53 @@ EXTENDED_SCENARIOS: list[dict[str, Any]] = [
     },
 ]
 
-
-def load_scenarios() -> list[dict[str, Any]]:
-    include_extended = os.environ.get("AGENT_REGRESSION_EXTENDED", "").strip().lower() in {"1", "true", "yes", "on"}
-    return [*BASE_SCENARIOS, *(EXTENDED_SCENARIOS if include_extended else [])]
+STRESS_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "name": "finance_tool",
+        "prompt": "무의존성 거래 전략 비교 대시보드와 로그 출력 구조 만들어",
+        "expect_browser": True,
+        "expect_domain": "finance_mode",
+        "expect_route": "coding",
+        "min_score": 70,
+    },
+    {
+        "name": "automation_logging",
+        "prompt": "무의존성 파일 처리 자동화 도구 만들고 로그 파일도 남기게 해",
+        "expect_browser": True,
+        "expect_domain": "automation_mode",
+        "expect_route": "coding",
+        "min_score": 70,
+    },
+    {
+        "name": "app_feedback_ready",
+        "prompt": "무의존성 일정 관리 앱 만들고 파일을 나눠서 유지보수 쉽게 구성해",
+        "expect_browser": True,
+        "expect_domain": "app_mode",
+        "expect_route": "coding",
+        "min_score": 70,
+    },
+]
 
 
 def safe_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def load_profile() -> str:
+    explicit = os.environ.get(PROFILE_ENV, "").strip().lower()
+    if explicit in {"base", "extended", "stress"}:
+        return explicit
+    include_extended = os.environ.get(EXTENDED_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    return "extended" if include_extended else DEFAULT_PROFILE
+
+
+def load_scenarios() -> tuple[str, list[dict[str, Any]]]:
+    profile = load_profile()
+    if profile == "stress":
+        return profile, [*BASE_SCENARIOS, *EXTENDED_SCENARIOS, *STRESS_SCENARIOS]
+    if profile == "extended":
+        return profile, [*BASE_SCENARIOS, *EXTENDED_SCENARIOS]
+    return profile, list(BASE_SCENARIOS)
 
 
 def evaluate_result(scenario: dict[str, Any], state: dict[str, Any]) -> tuple[bool, list[str], dict[str, Any]]:
@@ -92,6 +136,7 @@ def evaluate_result(scenario: dict[str, Any], state: dict[str, Any]) -> tuple[bo
     implementation = safe_dict(best_attempt.get("implementation"))
     browser = safe_dict(best_attempt.get("browser"))
     interpretation = safe_dict(result.get("interpretation"))
+    review = safe_dict(best_attempt.get("review"))
 
     status = str(state.get("status") or "")
     score = int(grade.get("score", 0) or 0)
@@ -126,17 +171,41 @@ def evaluate_result(scenario: dict[str, Any], state: dict[str, Any]) -> tuple[bo
         "browser_mode": browser.get("mode", ""),
         "browser_url": browser.get("url", ""),
         "app_type": implementation.get("app_type", ""),
+        "review_summary": review.get("summary", ""),
     }
     return len(issues) == 0, issues, summary
 
 
+def build_aggregate_report(items: list[dict[str, Any]]) -> dict[str, Any]:
+    if not items:
+        return {
+            "scenario_count": 0,
+            "passed_count": 0,
+            "failed_count": 0,
+            "avg_score": 0,
+            "avg_elapsed_seconds": 0,
+            "max_elapsed_seconds": 0,
+        }
+    scores = [int((item.get("summary") or {}).get("score", 0) or 0) for item in items]
+    elapsed = [float((item.get("summary") or {}).get("elapsed_seconds", 0.0) or 0.0) for item in items]
+    passed = sum(1 for item in items if item.get("ok"))
+    return {
+        "scenario_count": len(items),
+        "passed_count": passed,
+        "failed_count": len(items) - passed,
+        "avg_score": round(sum(scores) / len(scores), 2),
+        "avg_elapsed_seconds": round(sum(elapsed) / len(elapsed), 2),
+        "max_elapsed_seconds": round(max(elapsed), 2),
+    }
+
+
 def main() -> int:
     os.environ["OPENAI_API_KEY"] = ""
-    scenarios = load_scenarios()
+    profile, scenarios = load_scenarios()
     report: dict[str, Any] = {
         "cwd": str(ROOT),
         "openai_key_present": bool(os.environ.get("OPENAI_API_KEY")),
-        "extended_mode": len(scenarios) != len(BASE_SCENARIOS),
+        "profile": profile,
         "scenarios": [],
     }
     overall_ok = True
@@ -146,17 +215,17 @@ def main() -> int:
         state = run_once(str(scenario["prompt"]))
         ok, issues, summary = evaluate_result(scenario, state)
         summary["elapsed_seconds"] = round(time.time() - started_at, 2)
-        report["scenarios"].append(
-            {
-                "name": scenario["name"],
-                "prompt": scenario["prompt"],
-                "ok": ok,
-                "issues": issues,
-                "summary": summary,
-            }
-        )
+        item = {
+            "name": scenario["name"],
+            "prompt": scenario["prompt"],
+            "ok": ok,
+            "issues": issues,
+            "summary": summary,
+        }
+        report["scenarios"].append(item)
         overall_ok = overall_ok and ok
 
+    report["aggregate"] = build_aggregate_report(report["scenarios"])
     report["overall_ok"] = overall_ok
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if overall_ok else 1
