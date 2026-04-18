@@ -103,6 +103,33 @@ def check_feedback_alignment(output_dir: Path, implementation: dict[str, Any]) -
     return checks
 
 
+def check_structure_rules(implementation: dict[str, Any]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    rules = [str(item).strip() for item in implementation.get("structure_rules") or [] if str(item).strip()]
+    written_files = [str(item).replace("\\", "/").lower() for item in implementation.get("written_files") or []]
+    if not rules:
+        return checks
+    if any("index.html" in rule for rule in rules):
+        required = ("index.html", "styles.css", "app.js")
+        missing = [name for name in required if not any(path.endswith(name) for path in written_files)]
+        checks.append(
+            {
+                "name": "structure rule: web entry set",
+                "status": "ok" if not missing else "error",
+                "note": "웹 기본 진입 파일 구성이 맞습니다." if not missing else f"누락 파일: {', '.join(missing)}",
+            }
+        )
+    if any("main.py" in rule for rule in rules):
+        checks.append(
+            {
+                "name": "structure rule: python main entry",
+                "status": "ok" if any(path.endswith("main.py") for path in written_files) else "error",
+                "note": "main.py 엔트리포인트를 찾았습니다." if any(path.endswith("main.py") for path in written_files) else "main.py 엔트리포인트를 찾지 못했습니다.",
+            }
+        )
+    return checks
+
+
 def run_project_checks(output_dir: Path, implementation: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -149,6 +176,7 @@ def run_project_checks(output_dir: Path, implementation: dict[str, Any]) -> dict
             failures.append({"name": "static html structure", "status": "error", "note": "index.html 기본 구조가 불완전합니다."})
 
     checks.extend(check_feedback_alignment(output_dir, implementation))
+    checks.extend(check_structure_rules(implementation))
 
     for check in checks:
         if check.get("status") != "ok":

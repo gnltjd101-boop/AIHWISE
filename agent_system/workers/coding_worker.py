@@ -127,6 +127,20 @@ def should_enforce_multi_file_structure(interpretation: dict[str, Any]) -> bool:
     return any("파일 하나" in item or "one file" in item for item in disliked)
 
 
+def derive_structure_rules(prompt: str, interpretation: dict[str, Any], domain_mode: str) -> list[str]:
+    rules: list[str] = []
+    if should_enforce_multi_file_structure(interpretation):
+        rules.append("Do not put all functionality into one file.")
+        rules.append("Split major responsibilities across multiple files.")
+    lowered = prompt.lower()
+    if domain_mode in {"app_mode", "dashboard_mode"} or any(token in lowered for token in ("dashboard", "ui", "web")):
+        rules.append("For web outputs, use index.html, styles.css, and app.js when possible.")
+    else:
+        rules.append("For Python CLI outputs, keep the main entry file named main.py when possible.")
+    rules.append("Keep docs in README.md or docs/ and tests in smoke_test.py or tests/.")
+    return list(dict.fromkeys(rules))
+
+
 def plan_breaks_structure_feedback(plan: dict[str, Any], interpretation: dict[str, Any]) -> bool:
     if not should_enforce_multi_file_structure(interpretation):
         return False
@@ -137,6 +151,23 @@ def plan_breaks_structure_feedback(plan: dict[str, Any], interpretation: dict[st
     ]
     code_like = [path for path in file_paths if path.endswith((".py", ".js", ".html", ".css"))]
     return len(code_like) < 2
+
+
+def plan_breaks_naming_rules(plan: dict[str, Any], prompt: str, interpretation: dict[str, Any]) -> bool:
+    file_paths = [
+        str(item.get("path") or "").strip().replace("\\", "/").lower()
+        for item in plan.get("files") or []
+        if str(item.get("path") or "").strip()
+    ]
+    if not file_paths:
+        return True
+    domain_mode = str(interpretation.get("domain_mode") or "general_mode")
+    lowered = prompt.lower()
+    is_web = domain_mode in {"app_mode", "dashboard_mode"} or any(token in lowered for token in ("dashboard", "ui", "web"))
+    if is_web:
+        required = {"index.html", "styles.css", "app.js"}
+        return not required.issubset(set(file_paths))
+    return "main.py" not in file_paths
 
 
 def build_static_web_plan(job: AgentJob, target_dir: Path) -> dict[str, Any]:
@@ -524,6 +555,7 @@ def request_model_plan(job: AgentJob, existing_files: list[dict[str, str]]) -> d
     interpretation = job.metadata.get("interpretation") or {}
     plan = job.metadata.get("plan") or {}
     research = job.metadata.get("research") or {}
+    structure_rules = derive_structure_rules(job.prompt, interpretation, str(interpretation.get("domain_mode") or "general_mode"))
     response = safe_json_response(
         developer_text=(
             "You are a builder worker inside a local AI build agent. "
@@ -533,6 +565,7 @@ def request_model_plan(job: AgentJob, existing_files: list[dict[str, str]]) -> d
             "Strongly prefer zero-dependency outputs using static HTML/CSS/JS or standard-library Python. "
             "Avoid Streamlit, FastAPI, Flask, React, Vite, npm, and third-party dependencies unless the user explicitly requested them. "
             "If disliked_patterns mention keeping everything in one file, split responsibilities across multiple files. "
+            "Follow structure_rules when they are provided. "
             "If continuing an existing project, modify only needed files and keep the current structure."
         ),
         user_payload={
@@ -540,6 +573,7 @@ def request_model_plan(job: AgentJob, existing_files: list[dict[str, str]]) -> d
             "interpretation": interpretation,
             "plan": plan,
             "research": research,
+            "structure_rules": structure_rules,
             "existing_files": existing_files,
             "upgrade_candidate": job.metadata.get("upgrade_candidate", ""),
         },
@@ -608,6 +642,8 @@ class CodingWorker:
         job.summary = "빌더가 구현 계획을 준비하고 있습니다."
 
         try:
+            interpretation = job.metadata.get("interpretation") or {}
+            structure_rules = derive_structure_rules(job.prompt, interpretation, str(interpretation.get("domain_mode") or "general_mode"))
             target_dir = extract_target_output_dir(job)
             existing_files = collect_existing_files(target_dir)
             relevant_files = select_relevant_existing_files(job.prompt, existing_files)
@@ -621,6 +657,8 @@ class CodingWorker:
             if plan and plan_uses_external_dependencies(plan) and not user_explicitly_requested_framework(job.prompt):
                 plan = None
             if plan and plan_breaks_structure_feedback(plan, interpretation):
+                plan = None
+            if plan and plan_breaks_naming_rules(plan, job.prompt, interpretation):
                 plan = None
             if not plan:
                 plan = build_fallback_plan(job, target_dir)
@@ -683,6 +721,7 @@ class CodingWorker:
                 "research_source_summary": [str(item) for item in (job.metadata.get("research") or {}).get("source_summary") or []][:8],
                 "research_browser_notes": [str(item) for item in (job.metadata.get("research") or {}).get("browser_notes") or []][:8],
                 "structure_feedback_enforced": should_enforce_multi_file_structure(job.metadata.get("interpretation") or {}),
+                "structure_rules": structure_rules,
                 "generated_by": generated_by,
             }
             job.status = "done" if int(validation.get("failed", 0) or 0) == 0 else "error"

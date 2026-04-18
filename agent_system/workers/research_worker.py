@@ -12,6 +12,18 @@ from .openai_common import safe_text_response
 RESEARCH_MODEL = os.environ.get("AGENT_RESEARCH_MODEL", "gpt-5.4-mini")
 RESEARCH_REASONING_EFFORT = os.environ.get("AGENT_RESEARCH_REASONING_EFFORT", "low")
 
+HIGH_TRUST_DOMAINS = (
+    "docs.python.org",
+    "platform.openai.com",
+    "openai.com",
+    "developer.mozilla.org",
+    "developer.chrome.com",
+    "learn.microsoft.com",
+    "docs.github.com",
+    "github.com",
+    "pypi.org",
+)
+
 
 def build_source_cards(browser_context: dict[str, Any]) -> list[dict[str, str]]:
     cards: list[dict[str, str]] = []
@@ -50,15 +62,53 @@ def build_source_cards(browser_context: dict[str, Any]) -> list[dict[str, str]]:
     return cards[:8]
 
 
+def score_source_card(card: dict[str, str]) -> int:
+    domain = str(card.get("domain") or "").lower()
+    url = str(card.get("url") or "").lower()
+    score = 0
+    if any(domain == item or domain.endswith(f".{item}") for item in HIGH_TRUST_DOMAINS):
+        score += 5
+    if domain.endswith(".org"):
+        score += 2
+    if domain.endswith(".gov"):
+        score += 3
+    if domain.endswith(".edu"):
+        score += 3
+    if "docs" in domain or "/docs" in url:
+        score += 2
+    if url.startswith("https://"):
+        score += 1
+    if "search?" in url:
+        score -= 2
+    return score
+
+
+def rank_source_cards(source_cards: list[dict[str, str]]) -> list[dict[str, str]]:
+    ranked: list[dict[str, str]] = []
+    for item in source_cards:
+        ranked.append({**item, "score": str(score_source_card(item))})
+    ranked.sort(
+        key=lambda item: (
+            int(item.get("score") or 0),
+            len(str(item.get("title") or "")),
+        ),
+        reverse=True,
+    )
+    return ranked[:8]
+
+
 def summarize_sources(source_cards: list[dict[str, str]]) -> list[str]:
     lines: list[str] = []
     for item in source_cards[:5]:
         title = str(item.get("title") or item.get("domain") or item.get("url") or "").strip()
         domain = str(item.get("domain") or "").strip()
         url = str(item.get("url") or "").strip()
+        score = str(item.get("score") or "").strip()
         parts = [title]
         if domain and domain != title:
             parts.append(f"({domain})")
+        if score:
+            parts.append(f"[score {score}]")
         if url:
             parts.append(f"- {url}")
         lines.append(" ".join(parts).strip())
@@ -68,7 +118,7 @@ def summarize_sources(source_cards: list[dict[str, str]]) -> list[str]:
 def summarize_browser_context(browser_context: dict[str, Any]) -> dict[str, Any]:
     if not browser_context:
         return {}
-    source_cards = build_source_cards(browser_context)
+    source_cards = rank_source_cards(build_source_cards(browser_context))
     return {
         "query": str(browser_context.get("query") or ""),
         "url": str(browser_context.get("url") or ""),
