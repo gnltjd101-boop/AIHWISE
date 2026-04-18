@@ -122,6 +122,23 @@ def get_upgrade_candidate(job: AgentJob) -> str:
     return str(job.metadata.get("upgrade_candidate") or "").strip()
 
 
+def should_enforce_multi_file_structure(interpretation: dict[str, Any]) -> bool:
+    disliked = [str(item).strip().lower() for item in interpretation.get("disliked_patterns") or []]
+    return any("파일 하나" in item or "one file" in item for item in disliked)
+
+
+def plan_breaks_structure_feedback(plan: dict[str, Any], interpretation: dict[str, Any]) -> bool:
+    if not should_enforce_multi_file_structure(interpretation):
+        return False
+    file_paths = [
+        str(item.get("path") or "").strip().lower()
+        for item in plan.get("files") or []
+        if str(item.get("path") or "").strip()
+    ]
+    code_like = [path for path in file_paths if path.endswith((".py", ".js", ".html", ".css"))]
+    return len(code_like) < 2
+
+
 def build_static_web_plan(job: AgentJob, target_dir: Path) -> dict[str, Any]:
     interpretation = job.metadata.get("interpretation") or {}
     domain_mode = str(interpretation.get("domain_mode") or "general_mode")
@@ -515,6 +532,7 @@ def request_model_plan(job: AgentJob, existing_files: list[dict[str, str]]) -> d
             "Prefer minimal runnable MVPs. "
             "Strongly prefer zero-dependency outputs using static HTML/CSS/JS or standard-library Python. "
             "Avoid Streamlit, FastAPI, Flask, React, Vite, npm, and third-party dependencies unless the user explicitly requested them. "
+            "If disliked_patterns mention keeping everything in one file, split responsibilities across multiple files. "
             "If continuing an existing project, modify only needed files and keep the current structure."
         ),
         user_payload={
@@ -602,6 +620,8 @@ class CodingWorker:
             plan = None if force_fallback else request_model_plan(job, relevant_files if relevant_files else existing_files)
             if plan and plan_uses_external_dependencies(plan) and not user_explicitly_requested_framework(job.prompt):
                 plan = None
+            if plan and plan_breaks_structure_feedback(plan, interpretation):
+                plan = None
             if not plan:
                 plan = build_fallback_plan(job, target_dir)
             else:
@@ -660,6 +680,9 @@ class CodingWorker:
                 "disliked_patterns": [str(item) for item in (job.metadata.get("interpretation") or {}).get("disliked_patterns") or []][:8],
                 "next_priorities": [str(item) for item in (job.metadata.get("plan") or {}).get("next_priorities") or []][:8],
                 "research_sources": [str(item) for item in (job.metadata.get("research") or {}).get("sources") or []][:8],
+                "research_source_summary": [str(item) for item in (job.metadata.get("research") or {}).get("source_summary") or []][:8],
+                "research_browser_notes": [str(item) for item in (job.metadata.get("research") or {}).get("browser_notes") or []][:8],
+                "structure_feedback_enforced": should_enforce_multi_file_structure(job.metadata.get("interpretation") or {}),
                 "generated_by": generated_by,
             }
             job.status = "done" if int(validation.get("failed", 0) or 0) == 0 else "error"

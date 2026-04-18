@@ -15,6 +15,7 @@ RESEARCH_REASONING_EFFORT = os.environ.get("AGENT_RESEARCH_REASONING_EFFORT", "l
 
 def build_source_cards(browser_context: dict[str, Any]) -> list[dict[str, str]]:
     cards: list[dict[str, str]] = []
+
     for item in browser_context.get("top_results") or []:
         if not isinstance(item, dict):
             continue
@@ -29,30 +30,23 @@ def build_source_cards(browser_context: dict[str, Any]) -> list[dict[str, str]]:
                 "domain": parsed.netloc[:120],
             }
         )
-    for raw in browser_context.get("sources") or []:
-        url = str(raw or "").strip()
-        if not url or any(card["url"] == url for card in cards):
-            continue
-        parsed = urlparse(url)
-        cards.append(
-            {
-                "title": parsed.netloc or url,
-                "url": url[:500],
-                "domain": parsed.netloc[:120],
-            }
-        )
-    for fallback_key in ("url", "search_url"):
-        url = str(browser_context.get(fallback_key) or "").strip()
-        if not url or any(card["url"] == url for card in cards):
-            continue
-        parsed = urlparse(url)
-        cards.append(
-            {
-                "title": parsed.netloc or url,
-                "url": url[:500],
-                "domain": parsed.netloc[:120],
-            }
-        )
+
+    for key in ("sources", "url", "search_url"):
+        raw_values = browser_context.get(key) or []
+        values = raw_values if isinstance(raw_values, list) else [raw_values]
+        for raw in values:
+            url = str(raw or "").strip()
+            if not url or any(card["url"] == url for card in cards):
+                continue
+            parsed = urlparse(url)
+            cards.append(
+                {
+                    "title": parsed.netloc or url,
+                    "url": url[:500],
+                    "domain": parsed.netloc[:120],
+                }
+            )
+
     return cards[:8]
 
 
@@ -80,13 +74,32 @@ def summarize_browser_context(browser_context: dict[str, Any]) -> dict[str, Any]
         "url": str(browser_context.get("url") or ""),
         "search_url": str(browser_context.get("search_url") or ""),
         "mode": str(browser_context.get("mode") or ""),
-        "excerpt": str(browser_context.get("excerpt") or "")[:1000],
+        "excerpt": str(browser_context.get("excerpt") or "")[:1200],
+        "content_preview": str(browser_context.get("content_preview") or "")[:1800],
         "top_results": (browser_context.get("top_results") or [])[:5],
         "answer_blocks": (browser_context.get("answer_blocks") or [])[:3],
-        "sources": [str(item) for item in browser_context.get("sources") or []][:5],
+        "content_blocks": (browser_context.get("content_blocks") or [])[:5],
+        "sources": [str(item) for item in browser_context.get("sources") or []][:8],
         "source_cards": source_cards,
         "source_summary": summarize_sources(source_cards),
     }
+
+
+def build_browser_notes(browser_context: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
+    preview = str(browser_context.get("content_preview") or "").strip()
+    excerpt = str(browser_context.get("excerpt") or "").strip()
+    if preview:
+        notes.append("본문 미리보기")
+        notes.append(preview[:600])
+    elif excerpt:
+        notes.append("본문 발췌")
+        notes.append(excerpt[:600])
+    for block in (browser_context.get("content_blocks") or [])[:3]:
+        text = str((block or {}).get("text") or "").strip()
+        if text:
+            notes.append(text[:300])
+    return notes[:5]
 
 
 def build_fallback_report(job: AgentJob) -> dict[str, Any]:
@@ -100,19 +113,33 @@ def build_fallback_report(job: AgentJob) -> dict[str, Any]:
         "외부 API나 데이터 소스가 필요하면 연결 방식과 샘플 응답 구조를 먼저 정리합니다.",
         "테스트 가능한 입력/출력 경로를 하나 이상 확보합니다.",
     ]
+    browser_notes = build_browser_notes(browser_context)
+    if browser_notes:
+        implementation_notes.append("브라우저 본문에서 확인한 핵심 내용을 구현 메모에 반영합니다.")
+    if browser_context.get("source_summary"):
+        implementation_notes.append("출처 요약을 기준으로 우선순위 높은 참고 문서를 선택합니다.")
+
     sources: list[str] = []
     if browser_context:
-        if browser_context.get("url"):
-            sources.append(browser_context["url"])
         sources.extend(browser_context.get("sources") or [])
-        implementation_notes.append("브라우저 결과에서 확인한 URL과 검색 결과를 우선 참고합니다.")
+        if browser_context.get("url"):
+            sources.insert(0, browser_context["url"])
+
+    summary_parts = [
+        f"'{interpretation.get('goal_summary') or job.prompt[:80]}' 요청에 대한 구현 전 조사 초안을 만들었습니다.",
+    ]
+    if browser_notes:
+        summary_parts.append("브라우저 본문 핵심:")
+        summary_parts.extend(browser_notes[:3])
+
     return {
         "mode": "heuristic",
-        "summary": f"'{interpretation.get('goal_summary') or job.prompt[:80]}' 요청에 대한 구현 전 조사 초안을 만들었습니다.",
+        "summary": "\n".join(summary_parts).strip(),
         "queries": queries,
         "focus": focus,
         "implementation_notes": implementation_notes,
         "browser_context": browser_context,
+        "browser_notes": browser_notes,
         "sources": list(dict.fromkeys(sources))[:8],
         "source_cards": browser_context.get("source_cards") or [],
         "source_summary": browser_context.get("source_summary") or [],
@@ -124,13 +151,13 @@ def run_research(job: AgentJob) -> dict[str, Any]:
     plan = job.metadata.get("plan") or {}
     memory_summary = str(job.metadata.get("memory_summary") or "")
     browser_context = summarize_browser_context(job.metadata.get("browser_context") or {})
+    fallback = build_fallback_report(job)
     text = safe_text_response(
         developer_text=(
             "You are a research worker inside a local app-building agent system. "
-            "Use web search when available and return a concise Korean report with sections: "
-            "summary, sources, implementation_notes, risks. "
-            "If browser_context is provided, incorporate it directly into the research summary and source list. "
-            "If you cite sources, include short titles or domains, not long quotes."
+            "Return a concise Korean report with sections: summary, key findings, implementation notes, risks, sources. "
+            "If browser_context is provided, directly use content_preview, excerpt, content_blocks, and source_summary. "
+            "Prefer short actionable guidance over long explanations."
         ),
         user_payload={
             "prompt": job.prompt,
@@ -138,24 +165,29 @@ def run_research(job: AgentJob) -> dict[str, Any]:
             "plan": plan,
             "memory_summary": memory_summary,
             "browser_context": browser_context,
+            "fallback": fallback,
         },
         model=RESEARCH_MODEL,
         reasoning_effort=RESEARCH_REASONING_EFFORT,
         tools=[{"type": "web_search"}],
     )
+
     sources: list[str] = []
     if browser_context.get("url"):
         sources.append(browser_context["url"])
     sources.extend(browser_context.get("sources") or [])
+
     if not text:
-        return build_fallback_report(job)
+        return fallback
+
     return {
         "mode": "openai",
         "summary": text,
         "queries": interpretation.get("search_queries") or [],
         "focus": plan.get("research_focus") or [],
-        "implementation_notes": [],
+        "implementation_notes": fallback.get("implementation_notes") or [],
         "browser_context": browser_context,
+        "browser_notes": fallback.get("browser_notes") or [],
         "sources": list(dict.fromkeys([str(item) for item in sources]))[:8],
         "source_cards": browser_context.get("source_cards") or [],
         "source_summary": browser_context.get("source_summary") or [],
@@ -174,8 +206,8 @@ class ResearchWorker:
         job.status = "running"
         job.steps = [
             JobStep(name="requirements_scan", status="done", note="요청과 프로젝트 메모리를 확인했습니다."),
-            JobStep(name="source_collection", status="running", note="조사 보고서용 구현 메모를 준비하고 있습니다."),
-            JobStep(name="research_summary", status="pending", note="구현과 바로 연결된 조사 결과를 정리합니다."),
+            JobStep(name="source_collection", status="running", note="출처와 본문 핵심을 수집하고 있습니다."),
+            JobStep(name="research_summary", status="pending", note="구현과 바로 연결되는 조사 결과를 정리합니다."),
         ]
         job.summary = "연구 작업이 구현 전 조사 보고서를 준비하고 있습니다."
 
@@ -185,7 +217,7 @@ class ResearchWorker:
             job.status = "done"
             job.summary = "조사 결과를 정리했습니다."
             job.steps[1].status = "done"
-            job.steps[1].note = "조사 내용 수집을 마쳤습니다."
+            job.steps[1].note = "출처와 브라우저 본문 수집을 마쳤습니다."
             job.steps[1].updated_at = time.time()
             job.steps[2].status = "done"
             job.steps[2].note = "구현에 사용할 조사 보고서를 저장했습니다."
