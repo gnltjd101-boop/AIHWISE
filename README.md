@@ -217,3 +217,16 @@ cd "C:\Users\휘새\Desktop\AI에이전트"
 실행하면 아래 경로에 JSON과 Markdown 리포트가 같이 저장됩니다.
 
 - `agent_outputs/diagnostics/`
+
+## 장기 stress 점검
+
+더 긴 시나리오 묶음으로 성능 저하와 실패 경고까지 같이 보고 싶다면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\RUN_STRESS_CHECK.bat
+```
+
+실행하면 아래 경로에 stress 점검 요약이 저장됩니다.
+
+- `agent_outputs/stress_reports/`
