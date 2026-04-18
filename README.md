@@ -107,6 +107,20 @@ git commit -m "작업 내용"
 git push
 ```
 
+빠르게 한 번에 처리하려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\AUTO_GIT_SYNC.bat
+```
+
+커밋 메시지를 바로 넘기려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\AUTO_GIT_SYNC.bat "작업 내용"
+```
+
 ## 현재 설계 방향
 
 - 기존 구조를 살린 오케스트레이터 중심 확장
