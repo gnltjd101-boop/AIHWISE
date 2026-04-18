@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import getpass
 import os
 import re
 import time
-import getpass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
@@ -46,6 +46,11 @@ RESULT_LINK_SELECTORS = [
     "#search a h3",
     "main a",
 ]
+CONTENT_BLOCK_SELECTORS = [
+    "main h1, main h2, main h3, main p, main li",
+    "article h1, article h2, article h3, article p, article li",
+    "body h1, body h2, body h3, body p, body li",
+]
 DIRECT_URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
 
@@ -55,11 +60,7 @@ def should_enable_playwright() -> bool:
         return False
     if raw in {"1", "true", "yes", "on"}:
         return True
-    if any(
-        str(value).strip()
-        for key, value in os.environ.items()
-        if key.upper().startswith("CODEX_SANDBOX")
-    ):
+    if any(str(value).strip() for key, value in os.environ.items() if key.upper().startswith("CODEX_SANDBOX")):
         return False
     username = (os.environ.get("USERNAME") or getpass.getuser() or "").strip().lower()
     if username.startswith("codexsandbox"):
@@ -138,6 +139,8 @@ def fallback_result(plan: dict[str, Any], reason: str) -> dict[str, Any]:
         "extracted_from": "",
         "answer_blocks": [],
         "top_results": [],
+        "content_blocks": [],
+        "content_preview": "",
         "excerpt": reason,
         "sources": [],
     }
@@ -158,9 +161,8 @@ def extract_answer_blocks(page) -> list[dict[str, str]]:
     deduped: list[dict[str, str]] = []
     seen: set[str] = set()
     for block in blocks:
-        text = block["text"]
-        if text not in seen:
-            seen.add(text)
+        if block["text"] not in seen:
+            seen.add(block["text"])
             deduped.append(block)
     return deduped[:5]
 
@@ -202,6 +204,47 @@ def extract_main_excerpt(page) -> tuple[str, str]:
         except Exception:
             continue
     return "", ""
+
+
+def extract_content_blocks(page) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    for selector in CONTENT_BLOCK_SELECTORS:
+        try:
+            locators = page.locator(selector)
+            count = min(locators.count(), 12)
+            for index in range(count):
+                item = locators.nth(index)
+                text = item.inner_text(timeout=2000).strip()
+                tag = item.evaluate("(el) => el.tagName.toLowerCase()")
+                if text and len(text) >= 20:
+                    blocks.append({"tag": str(tag), "text": text[:500]})
+        except Exception:
+            continue
+        if blocks:
+            break
+    deduped: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in blocks:
+        if item["text"] not in seen:
+            seen.add(item["text"])
+            deduped.append(item)
+    return deduped[:8]
+
+
+def build_content_preview(answer_blocks: list[dict[str, str]], content_blocks: list[dict[str, str]], excerpt: str) -> str:
+    parts: list[str] = []
+    for item in answer_blocks[:2]:
+        text = str(item.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    for item in content_blocks[:3]:
+        text = str(item.get("text") or "").strip()
+        if text and text not in parts:
+            parts.append(text)
+    if excerpt and excerpt not in parts:
+        parts.append(excerpt)
+    joined = "\n\n".join(parts).strip()
+    return joined[:1800]
 
 
 def run_browser_task(job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
@@ -246,13 +289,15 @@ def run_browser_task(job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
             extracted_from, excerpt = extract_main_excerpt(page)
             answer_blocks = extract_answer_blocks(page)
             top_results = extract_top_results(page)
+            content_blocks = extract_content_blocks(page)
+            content_preview = build_content_preview(answer_blocks, content_blocks, excerpt)
             browser.close()
     except Exception as exc:
         return fallback_result(plan, f"Browser automation failed: {exc}")
 
-    sources = []
-    for item in top_results:
-        sources.append(item["url"])
+    sources = [item["url"] for item in top_results]
+    if final_url and final_url not in sources:
+        sources.insert(0, final_url)
 
     return {
         "goal": str(plan.get("goal") or ""),
@@ -266,8 +311,10 @@ def run_browser_task(job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
         "extracted_from": extracted_from,
         "answer_blocks": answer_blocks,
         "top_results": top_results,
+        "content_blocks": content_blocks,
+        "content_preview": content_preview,
         "excerpt": excerpt,
-        "sources": sources,
+        "sources": sources[:8],
     }
 
 
@@ -284,9 +331,9 @@ class BrowserWorker:
         job.steps = [
             JobStep(name="browser_plan", status="running", note="브라우저 자동화 계획을 만들고 있습니다."),
             JobStep(name="dom_execution", status="pending", note="브라우저 검색 또는 직접 접속을 수행합니다."),
-            JobStep(name="capture_result", status="pending", note="검색 결과와 캡처를 정리합니다."),
+            JobStep(name="capture_result", status="pending", note="검색 결과와 본문 요약을 정리합니다."),
         ]
-        job.summary = "브라우저 작업이 검색 결과 추출을 준비하고 있습니다."
+        job.summary = "브라우저 작업이 검색 결과와 본문을 수집하고 있습니다."
 
         try:
             interpretation = job.metadata.get("interpretation") or {}
