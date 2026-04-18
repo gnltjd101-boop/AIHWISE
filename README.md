@@ -74,6 +74,24 @@ $env:OPENAI_API_KEY=""
 python -c "import sys,json; sys.path.insert(0, r'C:\Users\휘새\Desktop\AI에이전트'); from agent_system.orchestrator import run_once; print(json.dumps(run_once('무의존성 테스트용 대시보드 만들어'), ensure_ascii=False, indent=2))"
 ```
 
+## 회귀 테스트 실행
+
+여러 대표 시나리오를 한 번에 검증하려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\RUN_REGRESSION_SUITE.bat
+```
+
+또는:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+python .\RUN_REGRESSION_SUITE.py
+```
+
+성공하면 마지막 JSON의 `overall_ok`가 `true`로 나옵니다.
+
 ## 프로젝트 명령
 
 채팅창에서 아래 명령을 그대로 쓸 수 있습니다.
