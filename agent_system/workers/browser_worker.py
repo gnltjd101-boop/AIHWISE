@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover
 
 BROWSER_MODEL = os.environ.get("AGENT_BROWSER_MODEL", "gpt-5.4-mini")
 BROWSER_REASONING_EFFORT = os.environ.get("AGENT_BROWSER_REASONING_EFFORT", "low")
+ENABLE_PLAYWRIGHT = os.environ.get("AGENT_ENABLE_PLAYWRIGHT", "").strip().lower() in {"1", "true", "yes", "on"}
 SEARCH_SELECTORS = [
     "textarea[name='q']",
     "input[name='q']",
@@ -186,6 +187,8 @@ def extract_main_excerpt(page) -> tuple[str, str]:
 
 
 def run_browser_task(job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+    if not ENABLE_PLAYWRIGHT:
+        return fallback_result(plan, "Playwright is disabled. Set AGENT_ENABLE_PLAYWRIGHT=1 to enable browser automation.")
     if sync_playwright is None:
         return fallback_result(plan, "Playwright is not installed, so browser automation was skipped.")
 
@@ -199,32 +202,35 @@ def run_browser_task(job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
     if query and str(plan.get("mode") or "search") != "direct_url":
         search_url = build_search_url(start_url, query)
 
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(1200)
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(1200)
 
-        if query and search_url == start_url and str(plan.get("mode") or "search") != "direct_url":
-            for selector in SEARCH_SELECTORS:
-                try:
-                    candidate = page.locator(selector).first
-                    if candidate.count():
-                        candidate.fill(query)
-                        candidate.press("Enter")
-                        page.wait_for_load_state("domcontentloaded", timeout=60000)
-                        page.wait_for_timeout(2200)
-                        break
-                except Exception:
-                    continue
+            if query and search_url == start_url and str(plan.get("mode") or "search") != "direct_url":
+                for selector in SEARCH_SELECTORS:
+                    try:
+                        candidate = page.locator(selector).first
+                        if candidate.count():
+                            candidate.fill(query)
+                            candidate.press("Enter")
+                            page.wait_for_load_state("domcontentloaded", timeout=60000)
+                            page.wait_for_timeout(2200)
+                            break
+                    except Exception:
+                        continue
 
-        page.screenshot(path=str(screenshot_path), full_page=True)
-        title = page.title()
-        final_url = page.url
-        extracted_from, excerpt = extract_main_excerpt(page)
-        answer_blocks = extract_answer_blocks(page)
-        top_results = extract_top_results(page)
-        browser.close()
+            page.screenshot(path=str(screenshot_path), full_page=True)
+            title = page.title()
+            final_url = page.url
+            extracted_from, excerpt = extract_main_excerpt(page)
+            answer_blocks = extract_answer_blocks(page)
+            top_results = extract_top_results(page)
+            browser.close()
+    except Exception as exc:
+        return fallback_result(plan, f"Browser automation failed: {exc}")
 
     sources = []
     for item in top_results:

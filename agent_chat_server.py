@@ -372,6 +372,7 @@ def call_fast_chat(user_text: str) -> str:
 
 def format_attempt(attempt: dict[str, Any]) -> list[str]:
     lines: list[str] = []
+    browser_result = parse_jsonish(attempt.get("browser"))
     implementation = parse_jsonish(attempt.get("implementation"))
     run_result = parse_jsonish(attempt.get("run"))
     test_result = parse_jsonish(attempt.get("test"))
@@ -384,6 +385,14 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
         lines.append(f"- 스택: {implementation['stack']}")
     if implementation.get("upgrade_candidate"):
         lines.append(f"- 선택된 업그레이드 후보: {implementation['upgrade_candidate']}")
+    if browser_result.get("search_url"):
+        lines.append(f"- 브라우저 검색 URL: {browser_result['search_url']}")
+    elif browser_result.get("url") and not implementation:
+        lines.append(f"- 브라우저 URL: {browser_result['url']}")
+    top_results = browser_result.get("top_results") or []
+    if top_results:
+        first = top_results[0]
+        lines.append(f"- 상위 검색 결과: {first.get('title', '')} / {first.get('url', '')}")
     if run_result.get("url"):
         lines.append(f"- 실행 URL: {run_result['url']}")
     if run_result.get("stdout_preview"):

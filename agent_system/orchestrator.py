@@ -202,6 +202,16 @@ def finalize_state(
     return state
 
 
+def choose_browser_prompt(root_prompt: str, interpretation: dict[str, Any], attempt_index: int, failure_analysis: dict[str, Any]) -> str:
+    if interpretation.get("requires_browser"):
+        return root_prompt
+    if attempt_index > 0 and failure_analysis.get("search_queries"):
+        queries = failure_analysis.get("search_queries") or []
+        return str(queries[0]) if queries else ""
+    queries = interpretation.get("search_queries") or []
+    return str(queries[0]) if queries else ""
+
+
 def run_upgrade_candidate(
     *,
     root_job: AgentJob,
@@ -238,6 +248,7 @@ def run_upgrade_candidate(
             "interpretation": interpretation,
             "plan": plan,
             "research": base_attempt.get("research") or {},
+            "browser_context": base_attempt.get("browser") or {},
             "target_output_dir": str(target_dir),
             "upgrade_candidate": candidate.get("name", ""),
         },
@@ -279,6 +290,7 @@ def run_upgrade_candidate(
                 "run_result": run_result,
                 "test_result": test_result,
                 "research_report": base_attempt.get("research") or {},
+                "browser_context": base_attempt.get("browser") or {},
                 "interpretation": interpretation,
             }
         },
@@ -294,6 +306,7 @@ def run_upgrade_candidate(
             "attempt_index": candidate_index,
             "variant_label": f"upgrade:{candidate.get('name', '')}",
             "research": base_attempt.get("research") or {},
+            "browser": base_attempt.get("browser") or {},
             "implementation": implementation,
             "run": run_result,
             "test": test_result,
@@ -393,10 +406,24 @@ def run_coding_pipeline(root_job: AgentJob, interpretation: dict[str, Any], plan
     max_attempts = max(1, int(plan.get("repair_budget", 1) or 1))
     attempts: list[dict[str, Any]] = []
     research_report: dict[str, Any] = {}
+    browser_context: dict[str, Any] = {}
     current_prompt = root_job.prompt
     failure_analysis: dict[str, Any] = {}
 
     for attempt_index in range(max_attempts):
+        browser_prompt = choose_browser_prompt(root_job.prompt, interpretation, attempt_index, failure_analysis)
+        if browser_prompt:
+            browsed = run_stage(
+                prompt=browser_prompt,
+                category="browser",
+                project_id=root_job.project_id,
+                domain_mode=root_job.domain_mode,
+                goal=root_job.goal,
+                metadata={"interpretation": interpretation, "plan": plan},
+                pipeline=pipeline,
+            )
+            browser_context = parse_jsonish(browsed.result)
+
         research_prompt = current_prompt
         if attempt_index > 0 and failure_analysis.get("search_queries"):
             research_prompt = current_prompt + "\n\n참고 검색 질의:\n- " + "\n- ".join(failure_analysis.get("search_queries")[:5])
@@ -411,6 +438,7 @@ def run_coding_pipeline(root_job: AgentJob, interpretation: dict[str, Any], plan
                 "interpretation": interpretation,
                 "plan": plan,
                 "memory_summary": memory_summary,
+                "browser_context": browser_context,
             },
             pipeline=pipeline,
         )
@@ -422,6 +450,8 @@ def run_coding_pipeline(root_job: AgentJob, interpretation: dict[str, Any], plan
         ]
         if memory_summary:
             build_prompt_parts.append("기존 프로젝트 메모리\n" + memory_summary)
+        if browser_context:
+            build_prompt_parts.append("브라우저 결과:\n" + json.dumps(browser_context, ensure_ascii=False, indent=2))
         if research_report:
             build_prompt_parts.append("조사 결과:\n" + json.dumps(research_report, ensure_ascii=False, indent=2))
         if attempt_index > 0 and failure_analysis:
@@ -437,6 +467,7 @@ def run_coding_pipeline(root_job: AgentJob, interpretation: dict[str, Any], plan
                 "interpretation": interpretation,
                 "plan": plan,
                 "research": research_report,
+                "browser_context": browser_context,
                 "target_output_dir": str(output_dir),
                 "failure_analysis": failure_analysis,
             },
@@ -478,6 +509,7 @@ def run_coding_pipeline(root_job: AgentJob, interpretation: dict[str, Any], plan
                     "run_result": run_result,
                     "test_result": test_result,
                     "research_report": research_report,
+                    "browser_context": browser_context,
                     "interpretation": interpretation,
                 }
             },
@@ -490,6 +522,7 @@ def run_coding_pipeline(root_job: AgentJob, interpretation: dict[str, Any], plan
             "variant_label": "base",
             "summary": reviewed.summary or built.summary,
             "research": research_report,
+            "browser": browser_context,
             "implementation": implementation,
             "run": run_result,
             "test": test_result,
@@ -623,34 +656,58 @@ def run_once(prompt: str) -> dict[str, Any]:
             metadata={"interpretation": interpretation, "plan": plan},
             pipeline=pipeline,
         )
+        browser_result = parse_jsonish(processed.result)
         grade = {
             "best_attempt_index": 0,
             "score": 70 if processed.status == "done" else 0,
             "status": "good" if processed.status == "done" else "blocked",
-            "best_attempt": {"summary": processed.summary, "browser": parse_jsonish(processed.result)},
+            "best_attempt": {"summary": processed.summary, "browser": browser_result},
             "attempt_comparison": [],
         }
-        return finalize_state(root_job, interpretation, plan, pipeline, [{"browser": processed.result, "summary": processed.summary}], grade, None)
+        state = finalize_state(root_job, interpretation, plan, pipeline, [{"browser": browser_result, "summary": processed.summary}], grade, None)
+        result = parse_jsonish(state.get("result"))
+        result["git"] = get_git_status()
+        state["result"] = result
+        write_state(state)
+        return state
 
     if interpretation.get("route_category") == "research":
         pipeline = []
+        browser_context = {}
+        browser_prompt = choose_browser_prompt(prompt, interpretation, 0, {})
+        if browser_prompt:
+            browsed = run_stage(
+                prompt=browser_prompt,
+                category="browser",
+                project_id=project_id,
+                domain_mode=str(interpretation.get("domain_mode") or "general_mode"),
+                goal=str(interpretation.get("goal_summary") or prompt),
+                metadata={"interpretation": interpretation, "plan": plan},
+                pipeline=pipeline,
+            )
+            browser_context = parse_jsonish(browsed.result)
         processed = run_stage(
             prompt=prompt,
             category="research",
             project_id=project_id,
             domain_mode=str(interpretation.get("domain_mode") or "general_mode"),
             goal=str(interpretation.get("goal_summary") or prompt),
-            metadata={"interpretation": interpretation, "plan": plan},
+            metadata={"interpretation": interpretation, "plan": plan, "browser_context": browser_context},
             pipeline=pipeline,
         )
         grade = {
             "best_attempt_index": 0,
             "score": 60 if processed.status == "done" else 0,
             "status": "good" if processed.status == "done" else "blocked",
-            "best_attempt": {"summary": processed.summary, "research": parse_jsonish(processed.result) or processed.result},
+            "best_attempt": {"summary": processed.summary, "research": parse_jsonish(processed.result) or processed.result, "browser": browser_context},
             "attempt_comparison": [],
         }
-        return finalize_state(root_job, interpretation, plan, pipeline, [{"research": processed.result, "summary": processed.summary}], grade, None)
+        state = finalize_state(root_job, interpretation, plan, pipeline, [{"research": processed.result, "browser": browser_context, "summary": processed.summary}], grade, None)
+        result = parse_jsonish(state.get("result"))
+        result["git"] = get_git_status()
+        state["result"] = result
+        write_state(state)
+        return state
 
     return run_coding_pipeline(root_job, interpretation, plan, memory)
 
