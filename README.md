@@ -204,3 +204,16 @@ cd "C:\Users\휘새\Desktop\AI에이전트"
 - 더 많은 실전 요청 회귀 테스트
 - 자동 커밋/푸시 보조 스크립트 추가
 - 배포용 실행 문서와 예제 프로젝트 추가
+
+## 운영 진단 리포트
+
+현재 Git 상태, 최근 작업 상태, 활성 프로젝트 메모리, 최신 회귀 테스트 결과를 한 번에 모아서 보고 싶다면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\GENERATE_DIAGNOSTICS_REPORT.bat
+```
+
+실행하면 아래 경로에 JSON과 Markdown 리포트가 같이 저장됩니다.
+
+- `agent_outputs/diagnostics/`
