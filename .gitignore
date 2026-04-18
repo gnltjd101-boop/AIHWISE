@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+agent_outputs/
+agent_projects/
+agent_jobs.jsonl
+agent_job_state.json
+agent_chat_history.jsonl
+agent_chat_meta.json
+agent_active_project.json
+OPEN_ME_STATUS.json
