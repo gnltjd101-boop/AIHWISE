@@ -230,3 +230,22 @@ cd "C:\Users\휘새\Desktop\AI에이전트"
 실행하면 아래 경로에 stress 점검 요약이 저장됩니다.
 
 - `agent_outputs/stress_reports/`
+
+## 운영 콘솔
+
+자주 쓰는 운영 명령을 한 번에 실행하려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\OPS_CONSOLE.bat
+```
+
+직접 액션을 지정할 수도 있습니다.
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\OPS_CONSOLE.bat status
+.\OPS_CONSOLE.bat diagnostics
+.\OPS_CONSOLE.bat stress
+.\OPS_CONSOLE.bat backup nightly
+```
