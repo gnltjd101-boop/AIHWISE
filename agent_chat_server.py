@@ -39,7 +39,7 @@ HTML = """<!doctype html>
   <style>
     :root {
       --bg: #f4efe6;
-      --panel: #fffaf2;
+      --panel: rgba(255, 250, 242, 0.94);
       --line: #d7ccb8;
       --text: #1f1a17;
       --muted: #6d6258;
@@ -52,29 +52,43 @@ HTML = """<!doctype html>
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: linear-gradient(180deg, #efe7d8 0%, #f8f4ed 100%);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.45), transparent 35%),
+        linear-gradient(180deg, #efe7d8 0%, #f8f4ed 100%);
       color: var(--text);
       font: 16px/1.5 "Malgun Gothic", sans-serif;
     }
     .wrap {
-      max-width: 980px;
+      max-width: 1120px;
       margin: 0 auto;
       min-height: 100vh;
       display: grid;
-      grid-template-rows: auto auto 1fr auto;
-      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 14px;
       padding: 18px;
     }
+    .main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; min-width: 0; }
+    .side { display: grid; gap: 14px; align-content: start; }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 18px;
       box-shadow: 0 10px 30px rgba(65, 49, 31, 0.08);
+      backdrop-filter: blur(8px);
     }
-    .top, .status, .composer { padding: 16px 18px; }
+    .top, .statusPanel, .composer, .sidePanel { padding: 16px 18px; }
     .top h1 { margin: 0 0 6px; font-size: 24px; }
-    .top p, .hint, .meta, .label { color: var(--muted); }
-    .status { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .top p, .hint, .meta, .label, .sidePanel p { color: var(--muted); }
+    .statusPanel { display: grid; gap: 12px; }
+    .statusRow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .stat {
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(215, 204, 184, 0.8);
+      border-radius: 14px;
+      padding: 10px 12px;
+    }
+    .stat strong { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
     .badge {
       display: inline-flex;
       align-items: center;
@@ -93,10 +107,10 @@ HTML = """<!doctype html>
       border-radius: 22px;
       padding: 16px;
       overflow: auto;
-      min-height: 420px;
+      min-height: 460px;
     }
     .msg {
-      max-width: 86%;
+      max-width: 88%;
       margin-bottom: 12px;
       padding: 12px 14px;
       border-radius: 18px;
@@ -108,7 +122,7 @@ HTML = """<!doctype html>
     .msg.agent { margin-right: auto; background: var(--agent); }
     textarea {
       width: 100%;
-      min-height: 88px;
+      min-height: 96px;
       resize: vertical;
       border: 1px solid var(--line);
       border-radius: 14px;
@@ -134,36 +148,86 @@ HTML = """<!doctype html>
     }
     .send { background: var(--accent); color: white; }
     .clear { background: #ede4d6; color: var(--text); }
+    .sidePanel h2 { margin: 0 0 8px; font-size: 16px; }
+    .sidePanel ul { margin: 0; padding-left: 18px; }
+    .sidePanel li { margin: 0 0 6px; color: var(--muted); }
+    .mono { font-family: Consolas, "Malgun Gothic", monospace; word-break: break-all; }
+    @media (max-width: 960px) {
+      .wrap { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="panel top">
-      <h1>AI 에이전트 채팅</h1>
-      <p>아이디어를 입력하면 조사, 코딩, 실행, 테스트, 리뷰까지 이어서 처리합니다.</p>
-    </div>
-    <div class="panel status">
-      <span id="badge" class="badge">대기 중</span>
-      <span class="label">현재 작업:</span>
-      <span id="currentCommand">없음</span>
-    </div>
-    <div id="chat" class="chat"></div>
-    <div class="panel composer">
-      <textarea id="input" placeholder="예: 업비트/빗썸 시세차익 대시보드 만들어&#10;예: 현재 프로젝트 고도화해&#10;예: 현재 프로젝트 확인"></textarea>
-      <div class="actions">
-        <div class="hint">Enter 전송 / Shift+Enter 줄바꿈</div>
-        <div>
-          <button class="clear" id="clearBtn" type="button">대화 비우기</button>
-          <button class="send" id="sendBtn" type="button">보내기</button>
+    <section class="main">
+      <div class="panel top">
+        <h1>AI 에이전트 채팅</h1>
+        <p>아이디어를 입력하면 조사, 코딩, 실행, 테스트, 리뷰, 재시도까지 이어서 처리합니다.</p>
+      </div>
+      <div class="panel statusPanel">
+        <div class="statusRow">
+          <span id="badge" class="badge">대기 중</span>
+          <span class="label">현재 작업:</span>
+          <span id="currentCommand">없음</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <strong>최근 상태 요약</strong>
+            <div id="currentSummary">없음</div>
+          </div>
+          <div class="stat">
+            <strong>최근 업데이트</strong>
+            <div id="updatedAt">-</div>
+          </div>
+          <div class="stat">
+            <strong>메시지 수</strong>
+            <div id="messageCount">0</div>
+          </div>
+          <div class="stat">
+            <strong>현재 포트</strong>
+            <div>8780</div>
+          </div>
         </div>
       </div>
-    </div>
+      <div id="chat" class="chat"></div>
+      <div class="panel composer">
+        <textarea id="input" placeholder="예: 업비트/빗썸 시세차익 대시보드 만들어&#10;예: 현재 프로젝트 고도화해&#10;예: 현재 프로젝트 확인"></textarea>
+        <div class="actions">
+          <div class="hint">Enter 전송 / Shift+Enter 줄바꿈</div>
+          <div>
+            <button class="clear" id="clearBtn" type="button">대화 비우기</button>
+            <button class="send" id="sendBtn" type="button">보내기</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <aside class="side">
+      <div class="panel sidePanel">
+        <h2>빠른 명령</h2>
+        <ul>
+          <li>현재 프로젝트 확인</li>
+          <li>새 프로젝트로 시작</li>
+          <li>현재 프로젝트 초기화</li>
+          <li>이 요구 확정: ...</li>
+          <li>이 방식 싫어: ...</li>
+          <li>다음 우선순위: ...</li>
+        </ul>
+      </div>
+      <div class="panel sidePanel">
+        <h2>운영 메모</h2>
+        <p>작업 결과 메시지에는 점수, 출처 점수, 구조 규칙, 실패 분석이 같이 표시됩니다.</p>
+      </div>
+    </aside>
   </div>
   <script>
     const chatEl = document.getElementById("chat");
     const inputEl = document.getElementById("input");
     const badgeEl = document.getElementById("badge");
     const currentCommandEl = document.getElementById("currentCommand");
+    const currentSummaryEl = document.getElementById("currentSummary");
+    const updatedAtEl = document.getElementById("updatedAt");
+    const messageCountEl = document.getElementById("messageCount");
 
     function statusLabel(value) {
       return {
@@ -198,12 +262,16 @@ HTML = """<!doctype html>
     async function refresh() {
       const res = await fetch("/api/state");
       const data = await res.json();
-      renderMessages(data.messages || []);
+      const messages = data.messages || [];
+      renderMessages(messages);
       const status = data.status || {};
       const stateValue = status.status || "idle";
       badgeEl.textContent = statusLabel(stateValue);
       badgeEl.className = "badge " + stateValue + (stateValue === "error" ? " error" : "");
       currentCommandEl.textContent = status.command || "없음";
+      currentSummaryEl.textContent = status.summary || "없음";
+      updatedAtEl.textContent = formatTime(status.updated_at);
+      messageCountEl.textContent = String(messages.length);
       document.title = statusLabel(stateValue) + " · AI 에이전트 채팅";
     }
 
@@ -377,6 +445,7 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
     run_result = parse_jsonish(attempt.get("run"))
     test_result = parse_jsonish(attempt.get("test"))
     review = parse_jsonish(attempt.get("review"))
+    research = parse_jsonish(attempt.get("research"))
 
     if implementation.get("output_dir"):
         lines.append(f"- 결과물 위치: {implementation['output_dir']}")
@@ -395,6 +464,16 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
     if top_results:
         first = top_results[0]
         lines.append(f"- 상위 검색 결과: {first.get('title', '')} / {first.get('url', '')}")
+    if browser_result.get("content_preview"):
+        preview = str(browser_result["content_preview"]).strip().replace("\n", " ")
+        lines.append(f"- 브라우저 본문 미리보기: {preview[:180]}")
+
+    source_summary = research.get("source_summary") or implementation.get("research_source_summary") or []
+    if source_summary:
+        lines.append(f"- 주요 출처: {source_summary[0]}")
+    browser_notes = research.get("browser_notes") or implementation.get("research_browser_notes") or []
+    if browser_notes:
+        lines.append(f"- 조사 메모: {str(browser_notes[0])[:180]}")
 
     if run_result.get("url"):
         lines.append(f"- 실행 URL: {run_result['url']}")
@@ -404,8 +483,21 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
         lines.append(f"- 실행 오류: {run_result['error'][:180]}")
     if test_result:
         lines.append(f"- 테스트: 통과 {test_result.get('passed', 0)} / 실패 {test_result.get('failed', 0)}")
+        project_checks = test_result.get("project_checks") or []
+        structure_checks = [item for item in project_checks if "structure rule" in str(item.get("name", ""))]
+        if structure_checks:
+            first_check = structure_checks[0]
+            lines.append(f"- 구조 규칙 검사: {first_check.get('status', '')} / {first_check.get('note', '')}")
     if review.get("summary"):
         lines.append(f"- 리뷰: {review['summary']}")
+    feedback_alignment = review.get("feedback_alignment") or {}
+    if feedback_alignment:
+        lines.append(
+            "- 피드백 반영: 요구사항 "
+            f"{feedback_alignment.get('confirmed_requirements_count', 0)} / "
+            f"회피 패턴 {feedback_alignment.get('disliked_patterns_count', 0)} / "
+            f"출처 {feedback_alignment.get('source_count', 0)}"
+        )
     return lines
 
 
@@ -444,6 +536,9 @@ def pretty_print_job_result(state: dict[str, Any]) -> str:
         lines.append(f"- 실제 선택된 후보: {best_executed['name']} / 점수 {grade_info.get('score', 0)}")
 
     pipeline = result.get("pipeline") or state.get("pipeline") or []
+    failure_steps = [item for item in pipeline if str(item.get("category") or "") == "failure_analysis"]
+    if failure_steps:
+        lines.append(f"- 최근 실패 분석: {failure_steps[-1].get('summary', '')}")
     if pipeline:
         lines.append("- 최근 파이프라인:")
         for item in pipeline[-8:]:
