@@ -377,6 +377,7 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
     run_result = parse_jsonish(attempt.get("run"))
     test_result = parse_jsonish(attempt.get("test"))
     review = parse_jsonish(attempt.get("review"))
+
     if implementation.get("output_dir"):
         lines.append(f"- 결과물 위치: {implementation['output_dir']}")
     if implementation.get("app_type"):
@@ -385,6 +386,7 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
         lines.append(f"- 스택: {implementation['stack']}")
     if implementation.get("upgrade_candidate"):
         lines.append(f"- 선택된 업그레이드 후보: {implementation['upgrade_candidate']}")
+
     if browser_result.get("search_url"):
         lines.append(f"- 브라우저 검색 URL: {browser_result['search_url']}")
     elif browser_result.get("url") and not implementation:
@@ -393,6 +395,7 @@ def format_attempt(attempt: dict[str, Any]) -> list[str]:
     if top_results:
         first = top_results[0]
         lines.append(f"- 상위 검색 결과: {first.get('title', '')} / {first.get('url', '')}")
+
     if run_result.get("url"):
         lines.append(f"- 실행 URL: {run_result['url']}")
     if run_result.get("stdout_preview"):
@@ -415,6 +418,7 @@ def pretty_print_job_result(state: dict[str, Any]) -> str:
     best_attempt = result.get("best_attempt") or {}
     project_memory = result.get("project_memory") or {}
     git_info = result.get("git") or project_memory.get("git") or {}
+
     lines = ["작업 결과:"]
     if interpretation.get("goal_summary"):
         lines.append(f"- 목표: {interpretation['goal_summary']}")
@@ -425,9 +429,11 @@ def pretty_print_job_result(state: dict[str, Any]) -> str:
     lines.extend(format_attempt(best_attempt))
     if project_memory.get("latest_output_dir"):
         lines.append(f"- 프로젝트 메모리 기준 출력 위치: {project_memory['latest_output_dir']}")
+
     git_summary = summarize_git_status(git_info)
     if git_summary:
         lines.append(f"- Git: {git_summary}")
+
     parallel_upgrades = result.get("parallel_upgrades") or {}
     recommended_upgrade = parallel_upgrades.get("recommended") or {}
     best_executed = parallel_upgrades.get("best_executed") or {}
@@ -436,6 +442,7 @@ def pretty_print_job_result(state: dict[str, Any]) -> str:
     if best_executed.get("name"):
         grade_info = best_executed.get("grade") or {}
         lines.append(f"- 실제 선택된 후보: {best_executed['name']} / 점수 {grade_info.get('score', 0)}")
+
     pipeline = result.get("pipeline") or state.get("pipeline") or []
     if pipeline:
         lines.append("- 최근 파이프라인:")
@@ -488,12 +495,16 @@ def get_state_payload() -> dict[str, Any]:
     sync_assistant_messages()
     sync_job_messages()
     job_status = read_job_state()
-    status = {
-        "status": str(job_status.get("status") or "idle"),
-        "command": str(job_status.get("prompt") or ""),
-        "summary": str(job_status.get("summary") or ""),
-        "updated_at": float(job_status.get("updated_at") or time.time()),
-    } if job_status else {"status": "idle", "command": "", "summary": "", "updated_at": time.time()}
+    status = (
+        {
+            "status": str(job_status.get("status") or "idle"),
+            "command": str(job_status.get("prompt") or ""),
+            "summary": str(job_status.get("summary") or ""),
+            "updated_at": float(job_status.get("updated_at") or time.time()),
+        }
+        if job_status
+        else {"status": "idle", "command": "", "summary": "", "updated_at": time.time()}
+    )
     return {"status": status, "messages": load_jsonl(HISTORY_PATH)}
 
 
@@ -539,11 +550,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "empty text"}, HTTPStatus.BAD_REQUEST)
                 return
             append_jsonl(HISTORY_PATH, {"role": "user", "text": text, "timestamp": time.time()})
+
             project_response = handle_project_command(text)
             if project_response is not None:
                 append_jsonl(HISTORY_PATH, {"role": "agent", "text": project_response, "timestamp": time.time()})
                 self._send_json({"ok": True, "mode": "project_control"})
                 return
+
             if should_route_to_operator(text):
                 state = run_orchestrator_once(text)
                 append_jsonl(
