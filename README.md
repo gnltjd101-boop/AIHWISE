@@ -92,6 +92,23 @@ python .\RUN_REGRESSION_SUITE.py
 
 성공하면 마지막 JSON의 `overall_ok`가 `true`로 나옵니다.
 
+## 브라우저 자동화
+
+기본적으로 일반 로컬 실행 환경에서는 Playwright 브라우저 자동화가 켜집니다.  
+제한된 환경에서는 자동으로 폴백 검색 모드로 내려갑니다.
+
+강제로 켜려면:
+
+```powershell
+$env:AGENT_ENABLE_PLAYWRIGHT="1"
+```
+
+강제로 끄려면:
+
+```powershell
+$env:AGENT_ENABLE_PLAYWRIGHT="0"
+```
+
 ## 프로젝트 명령
 
 채팅창에서 아래 명령을 그대로 쓸 수 있습니다.

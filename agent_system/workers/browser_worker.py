@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import getpass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
@@ -19,7 +20,6 @@ except Exception:  # pragma: no cover
 
 BROWSER_MODEL = os.environ.get("AGENT_BROWSER_MODEL", "gpt-5.4-mini")
 BROWSER_REASONING_EFFORT = os.environ.get("AGENT_BROWSER_REASONING_EFFORT", "low")
-ENABLE_PLAYWRIGHT = os.environ.get("AGENT_ENABLE_PLAYWRIGHT", "").strip().lower() in {"1", "true", "yes", "on"}
 SEARCH_SELECTORS = [
     "textarea[name='q']",
     "input[name='q']",
@@ -47,6 +47,18 @@ RESULT_LINK_SELECTORS = [
     "main a",
 ]
 DIRECT_URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+
+
+def should_enable_playwright() -> bool:
+    raw = os.environ.get("AGENT_ENABLE_PLAYWRIGHT", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    username = (os.environ.get("USERNAME") or getpass.getuser() or "").strip().lower()
+    if username.startswith("codexsandbox"):
+        return False
+    return True
 
 
 def extract_direct_url(prompt: str) -> str:
@@ -187,8 +199,8 @@ def extract_main_excerpt(page) -> tuple[str, str]:
 
 
 def run_browser_task(job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
-    if not ENABLE_PLAYWRIGHT:
-        return fallback_result(plan, "Playwright is disabled. Set AGENT_ENABLE_PLAYWRIGHT=1 to enable browser automation.")
+    if not should_enable_playwright():
+        return fallback_result(plan, "Playwright is disabled in this environment. Set AGENT_ENABLE_PLAYWRIGHT=1 to force browser automation.")
     if sync_playwright is None:
         return fallback_result(plan, "Playwright is not installed, so browser automation was skipped.")
 
