@@ -656,6 +656,10 @@ class CodingWorker:
                 "upgrade_candidate": plan.get("upgrade_candidate", ""),
                 "upgrade_features": [str(item) for item in plan.get("upgrade_features") or []],
                 "upgrade_bonus": int(plan.get("upgrade_bonus", 0) or 0),
+                "confirmed_requirements": [str(item) for item in (job.metadata.get("interpretation") or {}).get("confirmed_requirements") or []][:8],
+                "disliked_patterns": [str(item) for item in (job.metadata.get("interpretation") or {}).get("disliked_patterns") or []][:8],
+                "next_priorities": [str(item) for item in (job.metadata.get("plan") or {}).get("next_priorities") or []][:8],
+                "research_sources": [str(item) for item in (job.metadata.get("research") or {}).get("sources") or []][:8],
                 "generated_by": generated_by,
             }
             job.status = "done" if int(validation.get("failed", 0) or 0) == 0 else "error"

@@ -12,6 +12,32 @@ REVIEW_MODEL = os.environ.get("AGENT_REVIEW_MODEL", "gpt-5.4-mini")
 REVIEW_REASONING_EFFORT = os.environ.get("AGENT_REVIEW_REASONING_EFFORT", "low")
 
 
+def build_feedback_alignment(result_payload: dict[str, Any]) -> dict[str, Any]:
+    implementation = result_payload.get("implementation") or {}
+    research_report = result_payload.get("research_report") or {}
+    interpretation = result_payload.get("interpretation") or {}
+    confirmed_requirements = [
+        str(item)
+        for item in implementation.get("confirmed_requirements")
+        or interpretation.get("confirmed_requirements")
+        or []
+    ]
+    disliked_patterns = [
+        str(item)
+        for item in implementation.get("disliked_patterns")
+        or interpretation.get("disliked_patterns")
+        or []
+    ]
+    source_cards = [item for item in research_report.get("source_cards") or [] if isinstance(item, dict)]
+    return {
+        "confirmed_requirements_count": len(confirmed_requirements),
+        "disliked_patterns_count": len(disliked_patterns),
+        "source_count": len(source_cards),
+        "requirements_considered": confirmed_requirements[:5],
+        "disliked_patterns_considered": disliked_patterns[:5],
+    }
+
+
 def build_heuristic_review(result_payload: dict[str, Any]) -> dict[str, Any]:
     implementation = result_payload.get("implementation") or {}
     run_result = result_payload.get("run_result") or {}
@@ -25,11 +51,12 @@ def build_heuristic_review(result_payload: dict[str, Any]) -> dict[str, Any]:
     for failure in (test_result.get("failures") or validation.get("failures") or [])[:3]:
         issues.append({"severity": "major", "title": "검증 실패", "detail": str(failure.get("note") or failure)[:200]})
     if not implementation.get("written_files"):
-        issues.append({"severity": "major", "title": "결과물 부족", "detail": "작성된 파일이 기록되지 않았습니다."})
+        issues.append({"severity": "major", "title": "결과물 부족", "detail": "작성된 파일 기록이 없습니다."})
 
     critical = sum(1 for issue in issues if issue["severity"] == "critical")
     major = sum(1 for issue in issues if issue["severity"] == "major")
     minor = sum(1 for issue in issues if issue["severity"] == "minor")
+    feedback_alignment = build_feedback_alignment(result_payload)
 
     overall_status = "good"
     if critical > 0:
@@ -42,9 +69,10 @@ def build_heuristic_review(result_payload: dict[str, Any]) -> dict[str, Any]:
         "overall_status": overall_status,
         "severity_counts": {"critical": critical, "major": major, "minor": minor},
         "issues": issues,
+        "feedback_alignment": feedback_alignment,
         "next_steps": [
-            "치명 오류가 있으면 엔트리포인트와 의존성부터 수정합니다." if critical else "핵심 요구사항 반영도를 높입니다.",
-            "실패한 검증 항목을 기준으로 재수정합니다." if test_failed else "다음 사용자 피드백을 반영할 수 있게 구조를 유지합니다.",
+            "치명 오류가 있으면 엔트리포인트와 실행 경로를 먼저 수정합니다." if critical else "확정 요구사항 반영 여부를 더 점검합니다.",
+            "실패한 검증 항목을 기준으로 수정합니다." if test_failed else "다음 사용자 피드백을 반영하기 쉽게 구조를 유지합니다.",
         ],
     }
 
@@ -53,18 +81,24 @@ def build_review(prompt: str, result_payload: dict[str, Any]) -> dict[str, Any]:
     response = safe_json_response(
         developer_text=(
             "You are a grader/reviewer inside a local AI build agent. "
-            "Return JSON only with keys: summary, overall_status, severity_counts, issues, next_steps. "
+            "Return JSON only with keys: summary, overall_status, severity_counts, issues, next_steps, feedback_alignment. "
             "overall_status must be one of good, needs_work, blocked. "
             "severity_counts must contain critical, major, minor. "
-            "issues must contain severity, title, detail."
+            "issues must contain severity, title, detail. "
+            "feedback_alignment must contain confirmed_requirements_count, disliked_patterns_count, source_count, "
+            "requirements_considered, disliked_patterns_considered."
         ),
-        user_payload={"prompt": prompt, "result": result_payload},
+        user_payload={"prompt": prompt, "result": result_payload, "fallback": build_heuristic_review(result_payload)},
         model=REVIEW_MODEL,
         reasoning_effort=REVIEW_REASONING_EFFORT,
     )
     if not response:
         return build_heuristic_review(result_payload)
-    return response
+    merged = build_heuristic_review(result_payload)
+    merged.update({key: value for key, value in response.items() if value not in (None, "", [], {})})
+    if not isinstance(merged.get("feedback_alignment"), dict):
+        merged["feedback_alignment"] = build_feedback_alignment(result_payload)
+    return merged
 
 
 class ReviewWorker:
@@ -78,11 +112,11 @@ class ReviewWorker:
         job.stage = "review"
         job.status = "running"
         job.steps = [
-            JobStep(name="review_scope", status="done", note="리뷰 입력 자료를 확인했습니다."),
-            JobStep(name="risk_scan", status="running", note="실행/테스트/구현 결과를 분석하고 있습니다."),
+            JobStep(name="review_scope", status="done", note="리뷰 입력 재료를 확인했습니다."),
+            JobStep(name="risk_scan", status="running", note="실행·테스트·구현 결과를 분석하고 있습니다."),
             JobStep(name="review_report", status="pending", note="최종 리뷰 보고서를 작성합니다."),
         ]
-        job.summary = "리뷰 작업이 결과물의 품질을 평가하고 있습니다."
+        job.summary = "리뷰 작업이 결과물의 위험과 품질을 평가하고 있습니다."
 
         try:
             result_payload = job.metadata.get("review_payload") or job.result or {}

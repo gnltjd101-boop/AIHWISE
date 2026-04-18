@@ -8,6 +8,7 @@ def grade_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     run_result = attempt.get("run") or {}
     test_result = attempt.get("test") or {}
     review = attempt.get("review") or {}
+    research = attempt.get("research") or {}
 
     validation = implementation.get("validation") or {}
     run_ok = bool(run_result) and not run_result.get("error")
@@ -20,6 +21,15 @@ def grade_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     project_check_ok = sum(1 for item in project_checks if str(item.get("status") or "") == "ok")
     upgrade_features = [str(item) for item in implementation.get("upgrade_features") or []]
     upgrade_bonus = int(implementation.get("upgrade_bonus", 0) or 0)
+    feedback_alignment = review.get("feedback_alignment") or {}
+    feedback_count = int(feedback_alignment.get("confirmed_requirements_count", 0) or 0)
+    disliked_count = int(feedback_alignment.get("disliked_patterns_count", 0) or 0)
+    source_count = int(
+        feedback_alignment.get("source_count", 0)
+        or len(research.get("source_cards") or [])
+        or len(research.get("sources") or [])
+        or 0
+    )
 
     score = 0
     if run_ok:
@@ -33,6 +43,10 @@ def grade_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     score += min(6, project_check_ok * 2)
     score += min(8, len(upgrade_features) * 2)
     score += min(6, upgrade_bonus)
+    feedback_score = min(9, min(6, feedback_count * 2) + min(3, disliked_count))
+    source_score = min(5, source_count)
+    score += feedback_score
+    score += source_score
 
     status = "good"
     if critical > 0 or not run_ok:
@@ -51,6 +65,8 @@ def grade_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
         "project_check_ok": project_check_ok,
         "upgrade_features": upgrade_features,
         "upgrade_candidate": implementation.get("upgrade_candidate", ""),
+        "feedback_score": feedback_score,
+        "source_score": source_score,
         "summary": review.get("summary") or attempt.get("summary") or "",
     }
 
@@ -64,6 +80,8 @@ def choose_best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any]:
         key=lambda item: (
             item["grade"]["score"],
             item["grade"]["run_ok"],
+            item["grade"]["feedback_score"],
+            item["grade"]["source_score"],
             item["grade"]["project_check_ok"],
         ),
         reverse=True,
@@ -78,6 +96,8 @@ def choose_best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any]:
                 "status": item["grade"]["status"],
                 "summary": item["grade"]["summary"],
                 "upgrade_candidate": item["grade"].get("upgrade_candidate", ""),
+                "feedback_score": item["grade"].get("feedback_score", 0),
+                "source_score": item["grade"].get("source_score", 0),
             }
         )
     return {
