@@ -92,12 +92,21 @@ python .\RUN_REGRESSION_SUITE.py
 
 성공하면 마지막 JSON의 `overall_ok`가 `true`로 나옵니다.
 기본 모드는 빠른 핵심 5개 시나리오만 검사합니다.
+실행할 때마다 결과 JSON은 `agent_outputs/regression_reports/` 아래에 자동 저장됩니다.
 
 확장 모드까지 돌리려면:
 
 ```powershell
 cd "C:\Users\휘새\Desktop\AI에이전트"
 $env:AGENT_REGRESSION_EXTENDED="1"
+python .\RUN_REGRESSION_SUITE.py
+```
+
+프로필로 직접 지정하려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+$env:AGENT_REGRESSION_PROFILE="stress"
 python .\RUN_REGRESSION_SUITE.py
 ```
 
@@ -163,6 +172,22 @@ cd "C:\Users\휘새\Desktop\AI에이전트"
 ```powershell
 cd "C:\Users\휘새\Desktop\AI에이전트"
 .\AUTO_GIT_SYNC.bat "작업 내용"
+```
+
+## 백업과 복구
+
+현재 코드, 상태 파일, 프로젝트 메모리를 zip으로 백업하려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\BACKUP_SNAPSHOT.bat smoke-test
+```
+
+생성된 zip을 다시 현재 폴더에 복구하려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+.\RESTORE_SNAPSHOT.bat "C:\Users\휘새\Desktop\AI에이전트\agent_backups\AI_AGENT_SNAPSHOT_YYYYMMDD_HHMMSS_manual.zip"
 ```
 
 ## 현재 설계 방향

@@ -9,6 +9,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
+REPORT_DIR = ROOT / "agent_outputs" / "regression_reports"
 sys.path.insert(0, str(ROOT))
 
 from agent_system.orchestrator import run_once  # noqa: E402
@@ -202,6 +203,7 @@ def build_aggregate_report(items: list[dict[str, Any]]) -> dict[str, Any]:
 def main() -> int:
     os.environ["OPENAI_API_KEY"] = ""
     profile, scenarios = load_scenarios()
+    suite_started_at = time.time()
     report: dict[str, Any] = {
         "cwd": str(ROOT),
         "openai_key_present": bool(os.environ.get("OPENAI_API_KEY")),
@@ -211,10 +213,10 @@ def main() -> int:
     overall_ok = True
 
     for scenario in scenarios:
-        started_at = time.time()
+        scenario_started_at = time.time()
         state = run_once(str(scenario["prompt"]))
         ok, issues, summary = evaluate_result(scenario, state)
-        summary["elapsed_seconds"] = round(time.time() - started_at, 2)
+        summary["elapsed_seconds"] = round(time.time() - scenario_started_at, 2)
         item = {
             "name": scenario["name"],
             "prompt": scenario["prompt"],
@@ -227,6 +229,12 @@ def main() -> int:
 
     report["aggregate"] = build_aggregate_report(report["scenarios"])
     report["overall_ok"] = overall_ok
+    report["created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    report["total_elapsed_seconds"] = round(time.time() - suite_started_at, 2)
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORT_DIR / f"regression_{profile}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    report["report_path"] = str(report_path)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if overall_ok else 1
 
