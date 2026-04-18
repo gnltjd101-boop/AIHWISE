@@ -91,6 +91,15 @@ python .\RUN_REGRESSION_SUITE.py
 ```
 
 성공하면 마지막 JSON의 `overall_ok`가 `true`로 나옵니다.
+기본 모드는 빠른 핵심 5개 시나리오만 검사합니다.
+
+확장 모드까지 돌리려면:
+
+```powershell
+cd "C:\Users\휘새\Desktop\AI에이전트"
+$env:AGENT_REGRESSION_EXTENDED="1"
+python .\RUN_REGRESSION_SUITE.py
+```
 
 ## 브라우저 자동화
 

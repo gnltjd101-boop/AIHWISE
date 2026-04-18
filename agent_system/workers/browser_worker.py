@@ -55,6 +55,12 @@ def should_enable_playwright() -> bool:
         return False
     if raw in {"1", "true", "yes", "on"}:
         return True
+    if any(
+        str(value).strip()
+        for key, value in os.environ.items()
+        if key.upper().startswith("CODEX_SANDBOX")
+    ):
+        return False
     username = (os.environ.get("USERNAME") or getpass.getuser() or "").strip().lower()
     if username.startswith("codexsandbox"):
         return False

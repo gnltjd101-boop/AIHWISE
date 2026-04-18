@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,32 +14,70 @@ sys.path.insert(0, str(ROOT))
 from agent_system.orchestrator import run_once  # noqa: E402
 
 
-SCENARIOS: list[dict[str, Any]] = [
-    {
-        "name": "dashboard_basic",
-        "prompt": "무의존성 테스트용 대시보드 만들어",
-        "expect_browser": True,
-        "min_score": 70,
-    },
+BASE_SCENARIOS: list[dict[str, Any]] = [
     {
         "name": "automation_basic",
         "prompt": "무의존성 자동화 도구 만들어",
         "expect_browser": True,
+        "expect_domain": "automation_mode",
+        "expect_route": "coding",
+        "min_score": 70,
+    },
+    {
+        "name": "finance_dashboard",
+        "prompt": "업비트 빗썸 시세차익 비교용 무의존성 대시보드 만들어",
+        "expect_browser": True,
+        "expect_domain": "finance_mode",
+        "expect_route": "coding",
+        "min_score": 65,
+    },
+    {
+        "name": "app_basic",
+        "prompt": "무의존성 일정 관리 앱 프로토타입 만들어",
+        "expect_browser": True,
+        "expect_domain": "app_mode",
+        "expect_route": "coding",
+        "min_score": 65,
+    },
+    {
+        "name": "data_basic",
+        "prompt": "무의존성 크롤링 결과 정리 도구 만들어",
+        "expect_browser": True,
+        "expect_domain": "data_mode",
+        "expect_route": "coding",
+        "min_score": 65,
+    },
+    {
+        "name": "browser_only",
+        "prompt": "https://docs.python.org/3/library/http.server.html 열어서 요약해",
+        "expect_browser": True,
+        "expect_route": "browser",
+        "min_score": 50,
+    },
+]
+
+EXTENDED_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "name": "dashboard_basic",
+        "prompt": "무의존성 테스트용 대시보드 만들어",
+        "expect_browser": True,
+        "expect_domain": "dashboard_mode",
+        "expect_route": "coding",
         "min_score": 70,
     },
     {
         "name": "docs_informed_build",
         "prompt": "파이썬 http.server 문서 참고해서 무의존성 안내 페이지 만들어",
         "expect_browser": True,
+        "expect_route": "coding",
         "min_score": 70,
     },
-    {
-        "name": "browser_only",
-        "prompt": "https://docs.python.org/3/library/http.server.html 열어서 요약해",
-        "expect_browser": True,
-        "min_score": 50,
-    },
 ]
+
+
+def load_scenarios() -> list[dict[str, Any]]:
+    include_extended = os.environ.get("AGENT_REGRESSION_EXTENDED", "").strip().lower() in {"1", "true", "yes", "on"}
+    return [*BASE_SCENARIOS, *(EXTENDED_SCENARIOS if include_extended else [])]
 
 
 def safe_dict(value: Any) -> dict[str, Any]:
@@ -52,10 +91,13 @@ def evaluate_result(scenario: dict[str, Any], state: dict[str, Any]) -> tuple[bo
     best_attempt = safe_dict(result.get("best_attempt"))
     implementation = safe_dict(best_attempt.get("implementation"))
     browser = safe_dict(best_attempt.get("browser"))
+    interpretation = safe_dict(result.get("interpretation"))
 
     status = str(state.get("status") or "")
     score = int(grade.get("score", 0) or 0)
     output_dir = str(implementation.get("output_dir") or "")
+    domain_mode = str(state.get("domainMode") or interpretation.get("domain_mode") or "")
+    route_category = str(state.get("category") or interpretation.get("route_category") or "")
 
     if status not in {"done", "error"}:
         issues.append(f"unexpected status: {status}")
@@ -67,11 +109,19 @@ def evaluate_result(scenario: dict[str, Any], state: dict[str, Any]) -> tuple[bo
         issues.append(f"missing output directory: {output_dir}")
     if scenario.get("expect_browser") and not browser:
         issues.append("missing browser context")
+    expected_domain = str(scenario.get("expect_domain") or "")
+    if expected_domain and domain_mode != expected_domain:
+        issues.append(f"unexpected domain: {domain_mode}")
+    expected_route = str(scenario.get("expect_route") or "")
+    if expected_route and route_category != expected_route:
+        issues.append(f"unexpected route: {route_category}")
 
     summary = {
         "status": status,
         "score": score,
         "projectId": state.get("projectId"),
+        "domain_mode": domain_mode,
+        "route_category": route_category,
         "output_dir": output_dir,
         "browser_mode": browser.get("mode", ""),
         "browser_url": browser.get("url", ""),
@@ -81,17 +131,21 @@ def evaluate_result(scenario: dict[str, Any], state: dict[str, Any]) -> tuple[bo
 
 
 def main() -> int:
-    os.environ.setdefault("OPENAI_API_KEY", "")
+    os.environ["OPENAI_API_KEY"] = ""
+    scenarios = load_scenarios()
     report: dict[str, Any] = {
         "cwd": str(ROOT),
         "openai_key_present": bool(os.environ.get("OPENAI_API_KEY")),
+        "extended_mode": len(scenarios) != len(BASE_SCENARIOS),
         "scenarios": [],
     }
     overall_ok = True
 
-    for scenario in SCENARIOS:
+    for scenario in scenarios:
+        started_at = time.time()
         state = run_once(str(scenario["prompt"]))
         ok, issues, summary = evaluate_result(scenario, state)
+        summary["elapsed_seconds"] = round(time.time() - started_at, 2)
         report["scenarios"].append(
             {
                 "name": scenario["name"],

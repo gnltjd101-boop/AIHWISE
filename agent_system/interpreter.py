@@ -11,9 +11,12 @@ DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "finance_mode": ("업비트", "빗썸", "거래소", "차익", "시세", "백테스트", "전략", "투자", "코인", "주식", "finance", "trading"),
     "app_mode": ("앱", "모바일", "안드로이드", "ios", "네비", "내비", "서비스", "회원", "화면", "ui", "ux"),
     "automation_mode": ("자동화", "반복", "매크로", "봇", "스케줄", "예약", "파일 처리", "workflow", "automation"),
-    "data_mode": ("크롤러", "수집", "정제", "etl", "파싱", "데이터", "csv", "json", "scrape", "crawl"),
+    "data_mode": ("크롤러", "크롤링", "수집", "정제", "etl", "파싱", "데이터", "csv", "json", "scrape", "crawl"),
     "dashboard_mode": ("대시보드", "시각화", "차트", "통계", "모니터링", "리포트", "dashboard"),
 }
+
+DIRECT_URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+CODING_HINTS = ("만들", "구현", "개발", "수정", "빌드", "code", "build", "app")
 
 ROUTE_HINTS: dict[str, tuple[str, ...]] = {
     "browser": ("검색", "찾아", "브라우저", "웹에서", "사이트", "screenshot", "browser", "google", "naver", "bing"),
@@ -60,14 +63,18 @@ def detect_domain_mode(prompt: str) -> str:
 
 def detect_route_category(prompt: str) -> str:
     normalized = _normalize_prompt(prompt)
+    has_direct_url = bool(DIRECT_URL_RE.search(normalized))
+    wants_coding = any(word in normalized.lower() for word in CODING_HINTS)
+    if has_direct_url and not wants_coding:
+        return "browser"
     if _contains_any(normalized, ROUTE_HINTS["browser"]):
-        if any(word in normalized.lower() for word in ("만들", "구현", "개발", "수정", "build", "code")):
+        if wants_coding:
             return "coding"
         return "browser"
     if _contains_any(normalized, ROUTE_HINTS["research"]):
-        if any(word in normalized.lower() for word in ("만들", "구현", "개발", "수정", "build", "code")):
+        if wants_coding:
             return "coding"
-        return "research"
+        return "browser" if has_direct_url else "research"
     if _contains_any(normalized, ROUTE_HINTS["coding"]):
         return "coding"
     return "coding"

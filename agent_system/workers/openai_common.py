@@ -7,23 +7,28 @@ import urllib.request
 from typing import Any
 
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+def get_openai_api_key() -> str:
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+def get_openai_base_url() -> str:
+    return os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip()
 
 
 def openai_available() -> bool:
-    return bool(OPENAI_API_KEY)
+    return bool(get_openai_api_key())
 
 
 def openai_request(path: str, body: dict[str, Any]) -> dict[str, Any]:
-    if not OPENAI_API_KEY:
+    api_key = get_openai_api_key()
+    if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set.")
     request = urllib.request.Request(
-        url=f"{OPENAI_BASE_URL}{path}",
+        url=f"{get_openai_base_url()}{path}",
         method="POST",
         data=json.dumps(body).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
     )
@@ -34,6 +39,8 @@ def openai_request(path: str, body: dict[str, Any]) -> dict[str, Any]:
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"OpenAI API error {exc.code}: {error_body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenAI API connection error: {exc}") from exc
 
 
 def extract_output_text(response: dict[str, Any]) -> str:
@@ -57,21 +64,24 @@ def safe_text_response(
 ) -> str | None:
     if not openai_available():
         return None
-    response = openai_request(
-        "/responses",
-        {
-            "model": model,
-            "reasoning": {"effort": reasoning_effort},
-            "tools": tools or [],
-            "input": [
-                {"role": "developer", "content": developer_text},
-                {
-                    "role": "user",
-                    "content": json.dumps(user_payload, ensure_ascii=False) if isinstance(user_payload, (dict, list)) else str(user_payload),
-                },
-            ],
-        },
-    )
+    try:
+        response = openai_request(
+            "/responses",
+            {
+                "model": model,
+                "reasoning": {"effort": reasoning_effort},
+                "tools": tools or [],
+                "input": [
+                    {"role": "developer", "content": developer_text},
+                    {
+                        "role": "user",
+                        "content": json.dumps(user_payload, ensure_ascii=False) if isinstance(user_payload, (dict, list)) else str(user_payload),
+                    },
+                ],
+            },
+        )
+    except Exception:
+        return None
     text = extract_output_text(response)
     return text or None
 
