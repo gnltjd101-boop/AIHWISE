@@ -13,7 +13,7 @@ from agent_system.git_tools import summarize_git_status
 from agent_system.interpreter import should_route_to_operator
 from agent_system.memory_manager import apply_user_feedback
 from agent_system.orchestrator import run_once as run_orchestrator_once
-from agent_system.paths import HISTORY_PATH, META_PATH, STATUS_PATH
+from agent_system.paths import HISTORY_PATH, META_PATH, OUTPUT_DIR, STATUS_PATH
 from agent_system.queue_store import (
     clear_active_project,
     delete_project_memory,
@@ -188,6 +188,14 @@ HTML = """<!doctype html>
             <strong>현재 포트</strong>
             <div>8780</div>
           </div>
+          <div class="stat">
+            <strong>최신 진단</strong>
+            <div id="diagnosticsSummary">없음</div>
+          </div>
+          <div class="stat">
+            <strong>Stress 상태</strong>
+            <div id="stressSummary">없음</div>
+          </div>
         </div>
       </div>
       <div id="chat" class="chat"></div>
@@ -218,6 +226,10 @@ HTML = """<!doctype html>
         <h2>운영 메모</h2>
         <p>작업 결과 메시지에는 점수, 출처 점수, 구조 규칙, 실패 분석이 같이 표시됩니다.</p>
       </div>
+      <div class="panel sidePanel">
+        <h2>최신 운영 리포트</h2>
+        <p id="opsSummary">아직 생성된 진단 리포트가 없습니다.</p>
+      </div>
     </aside>
   </div>
   <script>
@@ -228,6 +240,9 @@ HTML = """<!doctype html>
     const currentSummaryEl = document.getElementById("currentSummary");
     const updatedAtEl = document.getElementById("updatedAt");
     const messageCountEl = document.getElementById("messageCount");
+    const diagnosticsSummaryEl = document.getElementById("diagnosticsSummary");
+    const stressSummaryEl = document.getElementById("stressSummary");
+    const opsSummaryEl = document.getElementById("opsSummary");
 
     function statusLabel(value) {
       return {
@@ -272,6 +287,9 @@ HTML = """<!doctype html>
       currentSummaryEl.textContent = status.summary || "없음";
       updatedAtEl.textContent = formatTime(status.updated_at);
       messageCountEl.textContent = String(messages.length);
+      diagnosticsSummaryEl.textContent = status.diagnostics_summary || "없음";
+      stressSummaryEl.textContent = status.stress_summary || "없음";
+      opsSummaryEl.textContent = status.ops_summary || "아직 생성된 진단 리포트가 없습니다.";
       document.title = statusLabel(stateValue) + " · AI 에이전트 채팅";
     }
 
@@ -329,6 +347,73 @@ def read_json(path: Path) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def latest_matching_file(path: Path, pattern: str) -> Path | None:
+    if not path.exists():
+        return None
+    files = sorted(path.glob(pattern), key=lambda item: item.stat().st_mtime)
+    return files[-1] if files else None
+
+
+def load_latest_ops_snapshot() -> dict[str, Any]:
+    diagnostics_path = latest_matching_file(OUTPUT_DIR / "diagnostics", "diagnostics_*.json")
+    stress_path = latest_matching_file(OUTPUT_DIR / "stress_reports", "stress_check_*.json")
+    diagnostics = read_json(diagnostics_path) if diagnostics_path else {}
+    stress = read_json(stress_path) if stress_path else {}
+    return {
+        "diagnostics": diagnostics,
+        "stress": stress,
+        "diagnostics_path": str(diagnostics_path) if diagnostics_path else "",
+        "stress_path": str(stress_path) if stress_path else "",
+    }
+
+
+def summarize_ops_snapshot(snapshot: dict[str, Any]) -> dict[str, str]:
+    diagnostics = snapshot.get("diagnostics") or {}
+    stress = snapshot.get("stress") or {}
+    git = diagnostics.get("git") or {}
+    latest_state = diagnostics.get("latest_state") or {}
+    latest_regression = diagnostics.get("latest_regression") or {}
+    aggregate = latest_regression.get("aggregate") or {}
+    stress_aggregate = ((stress.get("regression") or {}).get("aggregate")) or {}
+
+    branch_status = str(git.get("branch_status") or "").splitlines()
+    branch_line = branch_status[0] if branch_status else ""
+    diagnostics_summary = " / ".join(
+        part
+        for part in [
+            f"작업 {latest_state.get('status', '')}".strip(),
+            f"점수 {latest_state.get('score', '')}".strip() if latest_state.get("score", "") != "" else "",
+            f"회귀 {aggregate.get('passed_count', 0)}/{aggregate.get('scenario_count', 0)}",
+        ]
+        if part
+    ).strip(" /")
+    stress_summary = " / ".join(
+        part
+        for part in [
+            f"상태 {stress.get('health', '')}".strip() if stress.get("health") else "",
+            f"평균 {stress_aggregate.get('avg_elapsed_seconds', 0)}초" if stress_aggregate else "",
+            f"최대 {stress_aggregate.get('max_elapsed_seconds', 0)}초" if stress_aggregate else "",
+        ]
+        if part
+    ).strip(" /")
+    ops_summary = " | ".join(
+        part
+        for part in [
+            branch_line,
+            diagnostics_summary,
+            stress_summary,
+            f"진단 파일: {Path(snapshot['diagnostics_path']).name}" if snapshot.get("diagnostics_path") else "",
+            f"stress 파일: {Path(snapshot['stress_path']).name}" if snapshot.get("stress_path") else "",
+        ]
+        if part
+    )
+    return {
+        "diagnostics_summary": diagnostics_summary or "없음",
+        "stress_summary": stress_summary or "없음",
+        "ops_summary": ops_summary or "아직 생성된 운영 리포트가 없습니다.",
+    }
 
 
 def append_jsonl(path: Path, entry: dict[str, Any]) -> None:
@@ -600,6 +685,8 @@ def get_state_payload() -> dict[str, Any]:
         if job_status
         else {"status": "idle", "command": "", "summary": "", "updated_at": time.time()}
     )
+    ops_snapshot = load_latest_ops_snapshot()
+    status.update(summarize_ops_snapshot(ops_snapshot))
     return {"status": status, "messages": load_jsonl(HISTORY_PATH)}
 
 
